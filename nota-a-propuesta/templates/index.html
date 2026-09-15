@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Nota de Reunión → Propuesta Comercial · Rebold</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="top">
+    <h1><span class="brand">REBOLD</span> — De nota de reunión a propuesta comercial</h1>
+    <span class="badge">Motor de extracción: {{ llm_modo }}</span>
+  </header>
+  <nav class="subnav"><a href="{{ url_for('dashboard') }}">← Dashboard</a></nav>
+
+  <main>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% if mensaje_aclaracion %}
+      <div class="flash">{{ mensaje_aclaracion }}</div>
+    {% endif %}
+
+    <div class="card">
+      <p class="section-title">Paso 1 — Pega la nota de la reunión</p>
+      <p class="muted">
+        Texto plano, transcripción pegada, o sube un .docx. La app extrae señales de negocio,
+        aplica las reglas comerciales de Rebold para decidir qué servicio(s) recomendar, y arma un
+        borrador de propuesta — nunca inventa cifras de inversión ni casos de prueba.
+      </p>
+
+      <form method="post" action="{{ url_for('procesar') }}" enctype="multipart/form-data">
+        <label for="cliente">Cliente</label>
+        <input type="text" id="cliente" name="cliente" placeholder="Nombre del cliente o prospecto"
+               value="{{ valores_previos.cliente if valores_previos else '' }}">
+
+        <label>¿Es cliente actual o prospecto nuevo? <span class="muted">(obligatorio — nunca se asume)</span></label>
+        <div class="radio-row">
+          <label><input type="radio" name="tipo_relacion" value="cliente_actual" required
+            {% if valores_previos and valores_previos.tipo_relacion == 'cliente_actual' %}checked{% endif %}> Cliente actual</label>
+          <label><input type="radio" name="tipo_relacion" value="prospecto_nuevo" required
+            {% if valores_previos and valores_previos.tipo_relacion == 'prospecto_nuevo' %}checked{% endif %}> Prospecto nuevo</label>
+        </div>
+
+        <div id="campo_servicios_actuales" style="display:none;">
+          <label for="servicios_actuales">¿Qué servicios de Rebold ya tiene este cliente?</label>
+          <input type="text" id="servicios_actuales" name="servicios_actuales"
+                 placeholder="ej: Rebold Audit, Activation Hub — o escribe 'no sé' si no estás seguro"
+                 value="{{ valores_previos.servicios_actuales if valores_previos else '' }}">
+        </div>
+
+        <label for="contacto_nombre">Nombre del contacto en el cliente</label>
+        <input type="text" id="contacto_nombre" name="contacto_nombre" placeholder="ej: Laura Gómez"
+               value="{{ valores_previos.contacto_nombre if valores_previos else '' }}">
+
+        <label for="contacto_email">Correo del contacto</label>
+        <input type="text" id="contacto_email" name="contacto_email" placeholder="ej: laura@cliente.com"
+               value="{{ valores_previos.contacto_email if valores_previos else '' }}">
+        <p class="muted" style="margin-top:0.3rem;">Estos dos datos solo se usan para identificar la propuesta en el dashboard interno del equipo — no se envían a ningún lado.</p>
+
+        <label for="participantes">Participantes (opcional)</label>
+        <input type="text" id="participantes" name="participantes" placeholder="Nombres de quienes estuvieron en la reunión"
+               value="{{ valores_previos.participantes if valores_previos else '' }}">
+
+        <label for="texto_bruto">Texto de la nota</label>
+        <textarea id="texto_bruto" name="texto_bruto" placeholder="Pega aquí lo conversado con el cliente...">{{ valores_previos.texto_bruto if valores_previos else '' }}</textarea>
+
+        <label for="archivo_docx">...o sube un .docx en vez de pegar texto</label>
+        <input type="file" id="archivo_docx" name="archivo_docx" accept=".docx">
+
+        <button type="submit">Procesar nota</button>
+      </form>
+    </div>
+
+    <p class="muted">
+      Servicios de la Growth Suite que este motor puede recomendar (máx. 2 por propuesta):
+      {{ servicios_disponibles|join(', ') }}.
+    </p>
+  </main>
+
+  <script>
+    const radios = document.querySelectorAll('input[name="tipo_relacion"]');
+    const campo = document.getElementById('campo_servicios_actuales');
+    function actualizar() {
+      const seleccionado = document.querySelector('input[name="tipo_relacion"]:checked');
+      campo.style.display = (seleccionado && seleccionado.value === 'cliente_actual') ? 'block' : 'none';
+    }
+    radios.forEach(r => r.addEventListener('change', actualizar));
+    actualizar();
+  </script>
+</body>
+</html>

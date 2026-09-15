@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+data/drafts/*.pptx
+data/audit_log.jsonl
+pricing/credentials.json
+pricing/token.json
+
+# Datos de negocio reales — nunca se versionan en un repo público.
+# Ver data/pricing.example.json para la plantilla sin cifras.
+data/pricing.json
+# Contiene nombre/correo reales de contactos de clientes (PII).
+data/propuestas.json

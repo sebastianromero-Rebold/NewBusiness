@@ -1,0 +1,114 @@
+{
+  "_meta": {
+    "fuente": "Skill rebold-servicios-suite (references/casos-prueba.md)",
+    "nota": "Estas son las ÚNICAS cifras de proof cases que la app puede usar. Nunca se inventan casos nuevos ni se editan las cifras. Si no hay un caso de la industria exacta del cliente, se usa el más cercano y se lo marca explícitamente como 'caso de referencia (industria distinta)'."
+  },
+  "casos": [
+    {
+      "id": "jagermeister",
+      "servicio": "Insight Factory",
+      "cliente": "Jägermeister",
+      "industria": "Bebidas alcohólicas",
+      "resumen": "Monitoreo 360° del ecosistema de bebidas alcohólicas en LATAM.",
+      "cifras": [
+        "+6.72 millones de conversaciones digitales trackeadas en 2025",
+        "10 países analizados",
+        "+2.000 encuestas",
+        "+50 oportunidades de negocio identificadas",
+        "+500 insights",
+        "Cambio de percepción de marca de +7pp tras el evento"
+      ]
+    },
+    {
+      "id": "4patas",
+      "servicio": "Creative Lab",
+      "cliente": "4Patas",
+      "industria": "Mascotas / consumo",
+      "resumen": "Workshop de marca y territorio emocional 'Amor imperfecto, real e incondicional'.",
+      "cifras": ["Sistema editorial de 4 pilares conectado a producto y negocio"]
+    },
+    {
+      "id": "colsubsidio",
+      "servicio": "Creative Lab",
+      "cliente": "Colsubsidio",
+      "industria": "Cajas de compensación / servicios",
+      "resumen": "Contenido de aniversario producido con IA, alta calidad visual y respuesta rápida, foco en activación.",
+      "cifras": []
+    },
+    {
+      "id": "henkel",
+      "servicio": "Creative Lab",
+      "cliente": "Henkel",
+      "industria": "Consumo masivo / industrial",
+      "resumen": "Desarrollo conceptual y ejecución creativa en tiempo récord.",
+      "cifras": []
+    },
+    {
+      "id": "supercerdo-multibanco",
+      "servicio": "Creative Lab",
+      "cliente": "Supercerdo / Punto de Pago / Multibanco / Parador Rojo / Uniban / Andesco",
+      "industria": "Retail / financiero / agroindustria",
+      "resumen": "Plataforma de marca + producción audiovisual y BTL, con contenido perfilado por audiencia de negocio.",
+      "cifras": []
+    },
+    {
+      "id": "falabella",
+      "servicio": "Activation Hub",
+      "cliente": "Banco Falabella",
+      "industria": "Banca / financiero",
+      "resumen": "Reducción de CPA en campañas de performance.",
+      "cifras": ["71% de reducción de CPA (de $208.000 a $60.000)"]
+    },
+    {
+      "id": "paramo-presenta",
+      "servicio": "Activation Hub",
+      "cliente": "Páramo Presenta",
+      "industria": "Entretenimiento / eventos",
+      "resumen": "Reducción de costo por intención de compra y mejora de CTR en campañas de boletería.",
+      "cifras": [
+        "60% de reducción de costo por intención de compra (de 100K a 40K)",
+        "CTR de hasta 23% en Meta/TikTok",
+        "CPC por debajo de $100",
+        "Tiempos de implementación de 7 días a 1 día hábil"
+      ]
+    },
+    {
+      "id": "ferias-colombia",
+      "servicio": "Activation Hub",
+      "cliente": "Ferias Colombia",
+      "industria": "Eventos / ferias",
+      "resumen": "Community management para 16 ferias en 4 canales.",
+      "cifras": ["Engagement rate de 6% a 10%", "Seguidores de 3,3k a 8,4k"]
+    },
+    {
+      "id": "keralty-mexico",
+      "servicio": "Activation Hub",
+      "cliente": "Keralty México",
+      "industria": "Salud",
+      "resumen": "Generación de leads con trazabilidad completa en campaña de conversión.",
+      "cifras": [
+        "520 leads con trazabilidad completa",
+        "+144% sobre KPI de conversaciones en WhatsApp",
+        "474K personas alcanzadas",
+        "CTR de 1.77% (el doble del benchmark del sector salud)",
+        "22 días de campaña con $54.630 MXN de inversión"
+      ]
+    },
+    {
+      "id": "msd-linea-animal",
+      "servicio": "Agent Lab",
+      "cliente": "MSD – Línea Animal",
+      "industria": "Salud animal / farmacéutico",
+      "resumen": "Recordación e impulso desde la base de clientes para fomentar recompra personalizada.",
+      "cifras": []
+    },
+    {
+      "id": "ptesa",
+      "servicio": "Agent Lab",
+      "cliente": "PTESA",
+      "industria": "Industrial",
+      "resumen": "Embajadores de marca con IA que dan vida a la marca desde la personalización y el asesoramiento.",
+      "cifras": []
+    }
+  ]
+}
