@@ -10,6 +10,7 @@ ni infiere del tamaño del cliente.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,8 +18,37 @@ from typing import Any
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 PENDIENTE_TEXTO = "Monto pendiente de definir con liderazgo Rebold"
 
+# En Cloud Run (detectado por las variables que la plataforma define solita)
+# el pricing real NUNCA vive en el código ni en el repo — vive en Firestore,
+# cargado una vez ahí por scripts/upload_pricing_to_firestore.py desde la copia
+# local de quien lo sube. Así, el link público de la app puede generar
+# propuestas sin que las cifras de Rebold hayan pasado nunca por GitHub.
+USANDO_FIRESTORE = bool(os.environ.get("K_SERVICE") or os.environ.get("GOOGLE_CLOUD_PROJECT"))
+FIRESTORE_COLLECTION = "config"
+FIRESTORE_DOC = "pricing"
+
+_firestore_client = None
+
+
+def _firestore():
+    global _firestore_client
+    if _firestore_client is None:
+        from google.cloud import firestore  # import diferido: no requerido en dev local
+
+        _firestore_client = firestore.Client()
+    return _firestore_client
+
 
 def _cargar_pricing() -> dict[str, Any]:
+    if USANDO_FIRESTORE:
+        snap = _firestore().collection(FIRESTORE_COLLECTION).document(FIRESTORE_DOC).get()
+        if snap.exists:
+            return snap.to_dict()
+        # Nadie ha corrido el script de carga todavía en este proyecto de GCP.
+        # Mismo comportamiento seguro que en local: todo sale "pendiente".
+        with open(DATA_DIR / "pricing.example.json", encoding="utf-8") as f:
+            return json.load(f)
+
     ruta = DATA_DIR / "pricing.json"
     if not ruta.exists():
         # Primer arranque después de clonar el repo: todavía no existe la copia

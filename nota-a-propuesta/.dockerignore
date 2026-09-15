@@ -1,0 +1,12 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+data/pricing.json
+data/propuestas.json
+data/audit_log.jsonl
+data/drafts/*.pptx
+pricing/credentials.json
+pricing/token.json
+.git/

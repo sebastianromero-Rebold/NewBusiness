@@ -1,13 +1,22 @@
-"""Almacén local de propuestas para el dashboard.
+"""Almacén de propuestas para el dashboard.
 
-Un JSON simple (una lista de registros) en `data/propuestas.json`. Suficiente
-para una instancia local de un equipo pequeño; si esto se convierte en un
-servicio compartido de verdad (varias personas escribiendo al mismo tiempo
-desde distintas máquinas) esto debe migrar a una base de datos real.
+Dos backends, elegidos automáticamente según el entorno:
+
+- **Local (por defecto)**: un JSON simple (`data/propuestas.json`). Suficiente
+  para correr la app en tu máquina.
+- **Firestore**: se activa solo si detecta que corre en Google Cloud Run
+  (variables de entorno `K_SERVICE`/`GOOGLE_CLOUD_PROJECT`, que Cloud Run
+  define automáticamente). Necesario en cuanto la app se comparte con varios
+  equipos desde una sola URL — un archivo JSON local no sobrevive a que Cloud
+  Run reinicie o reemplace la instancia, y no se comparte entre instancias.
+
+El resto de este módulo (crear_propuesta, marcar_descargada, etc.) es igual
+sin importar el backend — solo cambian `_leer_todas` / `_escribir_todas`.
 """
 from __future__ import annotations
 
 import json
+import os
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -15,11 +24,27 @@ from typing import Any
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 PROPUESTAS_PATH = DATA_DIR / "propuestas.json"
+FIRESTORE_COLLECTION = "propuestas"
+
+USANDO_FIRESTORE = bool(os.environ.get("K_SERVICE") or os.environ.get("GOOGLE_CLOUD_PROJECT"))
 
 _lock = threading.Lock()
+_firestore_client = None
+
+
+def _firestore():
+    global _firestore_client
+    if _firestore_client is None:
+        from google.cloud import firestore  # import diferido: no requerido en dev local
+
+        _firestore_client = firestore.Client()
+    return _firestore_client
 
 
 def _leer_todas() -> list[dict[str, Any]]:
+    if USANDO_FIRESTORE:
+        docs = _firestore().collection(FIRESTORE_COLLECTION).stream()
+        return [d.to_dict() for d in docs]
     if not PROPUESTAS_PATH.exists():
         return []
     try:
@@ -30,6 +55,8 @@ def _leer_todas() -> list[dict[str, Any]]:
 
 
 def _escribir_todas(registros: list[dict[str, Any]]) -> None:
+    """Solo usado por el backend local — Firestore se escribe documento a
+    documento en crear_propuesta/marcar_descargada, nunca se reescribe todo."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with open(PROPUESTAS_PATH, "w", encoding="utf-8") as f:
         json.dump(registros, f, ensure_ascii=False, indent=2)
@@ -44,31 +71,41 @@ def crear_propuesta(
     contacto_email: str,
     servicios_recomendados: list[str],
 ) -> None:
+    registro = {
+        "draft_id": draft_id,
+        "marca": marca,
+        "tipo_relacion": tipo_relacion,
+        "contacto_nombre": contacto_nombre,
+        "contacto_email": contacto_email,
+        "servicios_recomendados": servicios_recomendados,
+        "estado": "borrador",
+        "creado_en": datetime.now().isoformat(timespec="seconds"),
+        "descargado_en": None,
+        "archivo": None,
+    }
+    if USANDO_FIRESTORE:
+        _firestore().collection(FIRESTORE_COLLECTION).document(draft_id).set(registro)
+        return
     with _lock:
         registros = _leer_todas()
-        registros.append({
-            "draft_id": draft_id,
-            "marca": marca,
-            "tipo_relacion": tipo_relacion,
-            "contacto_nombre": contacto_nombre,
-            "contacto_email": contacto_email,
-            "servicios_recomendados": servicios_recomendados,
-            "estado": "borrador",
-            "creado_en": datetime.now().isoformat(timespec="seconds"),
-            "descargado_en": None,
-            "archivo": None,
-        })
+        registros.append(registro)
         _escribir_todas(registros)
 
 
 def marcar_descargada(draft_id: str, archivo: str) -> None:
+    cambios = {
+        "estado": "descargada",
+        "descargado_en": datetime.now().isoformat(timespec="seconds"),
+        "archivo": archivo,
+    }
+    if USANDO_FIRESTORE:
+        _firestore().collection(FIRESTORE_COLLECTION).document(draft_id).update(cambios)
+        return
     with _lock:
         registros = _leer_todas()
         for r in registros:
             if r["draft_id"] == draft_id:
-                r["estado"] = "descargada"
-                r["descargado_en"] = datetime.now().isoformat(timespec="seconds")
-                r["archivo"] = archivo
+                r.update(cambios)
         _escribir_todas(registros)
 
 
