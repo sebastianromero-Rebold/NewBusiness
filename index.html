@@ -99,6 +99,8 @@ label{display:block;font-size:13px;font-weight:600;color:#C9C9CF}label>input,lab
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}.modal .card{width:min(900px,100%)}
 #toasts{position:fixed;right:16px;bottom:16px;z-index:60;display:flex;flex-direction:column;gap:8px;max-width:min(440px,calc(100vw - 32px))}
 .toast{background:#1d1d22;border:1px solid var(--line);border-left:4px solid var(--ok);padding:10px 14px;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.4);font-size:14px}.toast.err{border-left-color:var(--err)}
+.manual{width:min(760px,100%)}.msteps{padding-left:20px}.msteps>li{margin:14px 0}.msteps .acts{margin:8px 0}.msteps textarea{margin-top:8px}.errtxt{color:#FF8A8A;margin-top:6px}
+.radios{display:flex;flex-direction:column;gap:10px;margin-bottom:10px}.radios .chk{white-space:normal;align-items:flex-start;font-weight:400}.radios input{margin-top:4px}
 details summary{cursor:pointer;font-weight:700;margin:14px 0 8px}
 @media (max-width:1180px){.editor{grid-template-columns:1fr}.thumbs{position:static;max-height:none;display:flex;gap:8px;overflow-x:auto}.thumb{flex:0 0 182px}.review{grid-template-columns:1fr}.review .side{position:static}}
 @media (max-width:760px){main#view{padding:16px}.grid2{grid-template-columns:1fr}.bar{grid-template-columns:100px 1fr 110px}header.top{gap:10px;padding:10px 16px;flex-wrap:wrap}.aibox{grid-template-columns:1fr}.aibox #bSave{justify-self:stretch}h1{font-size:21px}}
@@ -666,7 +668,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast('No se pudo guardar en el navegador: ' + e.message, 'err'); } }
 };
-let cfg = Object.assign({ backendUrl: DEFAULT_BACKEND_URL, teamCode: '', apiKey: '', model: 'claude-opus-5', nombre: '', email: '' }, store.get('rb_cfg', {}));
+let cfg = Object.assign({ backendUrl: DEFAULT_BACKEND_URL, teamCode: '', apiKey: '', model: 'claude-opus-5', motor: 'manual', nombre: '', email: '' }, store.get('rb_cfg', {}));
 if (!cfg.backendUrl && DEFAULT_BACKEND_URL) cfg.backendUrl = DEFAULT_BACKEND_URL;
 const saveCfg = () => store.set('rb_cfg', cfg);
 const online = () => !!cfg.backendUrl;
@@ -786,7 +788,65 @@ function parseJSON(text) {
   return JSON.parse(t.slice(a, b + 1));
 }
 
-async function askJSON(userContent, { max_tokens = 8000, effort = 'medium' } = {}) {
+// ── Motor de IA ──
+// 'manual' = el comercial copia el prompt en claude.ai con la cuenta de la empresa (sin costo de API).
+// 'api'    = llamada automática a la API de Claude (backend con ANTHROPIC_API_KEY o key local).
+function iaAutomatica() {
+  if (cfg.motor !== 'api') return false;
+  return online() ? !!(serverInfo && serverInfo.ia) : !!cfg.apiKey;
+}
+
+// Convierte un mensaje (texto + documentos) en un solo prompt para pegar en claude.ai.
+function promptTexto(userContent, adjuntos) {
+  const partes = (Array.isArray(userContent) ? userContent : [{ type: 'text', text: userContent }])
+    .filter(b => b.type === 'text').map(b => b.text);
+  return `Eres el estratega senior de Rebold. Si tienes disponibles las skills "rebold-servicios-suite" y "strategic-planning-360", úsalas; abajo va además el resumen oficial de ese conocimiento.
+IMPORTANTE: responde ÚNICAMENTE con un bloque de código \`\`\`json (sin artifacts, sin texto antes ni después).
+${adjuntos && adjuntos.length ? `\nARCHIVOS ADJUNTOS A ESTE CHAT (léelos como parte del material de la reunión): ${adjuntos.join(', ')}\n` : ''}
+${KB}
+${REGLAS}
+${SLIDE_SCHEMAS}
+────────────────────────────────────────
+${partes.join('\n\n')}`;
+}
+
+// Modal de copiar/pegar con claude.ai. Resuelve con el JSON que pega el usuario.
+function manualPrompt(titulo, prompt, adjuntos) {
+  return new Promise((resolve, reject) => {
+    const m = document.createElement('div');
+    m.className = 'modal';
+    m.innerHTML = `<div class="card manual">
+      <h3>${esc(titulo)}</h3>
+      <p class="muted sm">Usa tu cuenta de Claude de la empresa (sin costo adicional de API).</p>
+      <ol class="msteps">
+        <li><b>Copia el prompt</b> y pégalo en un chat nuevo de Claude.
+          <div class="acts"><button type="button" class="btn primary" data-copy>Copiar prompt</button><a class="btn" href="https://claude.ai/new" target="_blank" rel="noopener">Abrir claude.ai ↗</a><span class="muted sm" data-ok></span></div>
+          <details><summary class="sm">Ver el prompt (${Math.round(prompt.length / 1000)}k caracteres)</summary><textarea readonly rows="6" data-prompt></textarea></details></li>
+        ${adjuntos && adjuntos.length ? `<li><b>Adjunta en ese mismo chat</b> estos archivos (arrástralos a Claude):<div class="sm">${adjuntos.map(a => `<span class="tag">${esc(a)}</span>`).join(' ')}</div></li>` : ''}
+        <li><b>Pega aquí la respuesta completa</b> de Claude (el bloque JSON):
+          <textarea rows="8" data-resp placeholder="{ ... }"></textarea>
+          <div class="errtxt sm" data-err></div></li>
+      </ol>
+      <div class="actions"><button type="button" class="btn ghost" data-x>Cancelar</button><button type="button" class="btn primary" data-use>Usar respuesta</button></div></div>`;
+    document.body.appendChild(m);
+    const ta = $('[data-prompt]', m); ta.value = prompt;
+    $('[data-copy]', m).onclick = async () => {
+      try { await navigator.clipboard.writeText(prompt); }
+      catch (e) { ta.closest('details').open = true; ta.select(); document.execCommand('copy'); }
+      $('[data-ok]', m).textContent = '✓ Copiado. Pégalo en Claude con Ctrl+V.';
+    };
+    $('[data-x]', m).onclick = () => { m.remove(); reject(new Error('Generación cancelada')); };
+    $('[data-use]', m).onclick = () => {
+      try { const j = parseJSON($('[data-resp]', m).value); m.remove(); resolve(j); }
+      catch (e) {
+        $('[data-err]', m).textContent = 'No se pudo leer la respuesta (' + e.message + '). Copia el bloque JSON completo con el botón "Copiar" del bloque en Claude. Si la respuesta quedó cortada, escríbele "continúa" y pega todo junto.';
+      }
+    };
+  });
+}
+
+async function askJSON(userContent, { max_tokens = 8000, effort = 'medium', titulo = 'Ajuste con Claude', adjuntos = [] } = {}) {
+  if (!iaAutomatica()) return manualPrompt(titulo, promptTexto(userContent, adjuntos), adjuntos);
   const system = KB + REGLAS + SLIDE_SCHEMAS;
   const messages = [{ role: 'user', content: userContent }];
   let r = await api('llm', { system, messages, max_tokens, effort });
@@ -813,8 +873,26 @@ function datosPropuesta(p) {
 async function genEstrategia(prop, material) {
   const content = [];
   material.bloques.forEach(b => content.push(b));
-  content.push({
-    type: 'text', text: `${datosPropuesta(prop)}
+  content.push({ type: 'text', text: tareaEstrategia(prop, material) });
+  return askJSON(content, { max_tokens: 6000, effort: 'medium' });
+}
+
+// Modo manual: estrategia + todas las slides en una sola respuesta (un solo copiar/pegar).
+async function genTodoManual(prop, material) {
+  const txt = tareaEstrategia(prop, material)
+    .replace('y define el outline de la presentación.', 'y escribe la presentación completa.')
+    .replace(/ "outline": \[[^\n]*\n/, ' "slides": [ ...entre 10 y 14 objetos slide completos, con el formato de TIPOS DE SLIDE... ]\n')
+    .replace('Reglas del outline:', 'Reglas de la estructura de slides:');
+  const r = await askJSON([{ type: 'text', text: txt }], { titulo: `Generar la propuesta de ${prop.marca} con Claude`, adjuntos: material.adjuntos });
+  const slides = (Array.isArray(r.slides) ? r.slides : []).map(normSlide);
+  if (!slides.length) throw new Error('La respuesta no trae slides. Pídele a Claude que devuelva el JSON completo con "slides".');
+  const est = Object.assign({}, r); delete est.slides;
+  est.outline = slides.map(x => ({ tipo: x.tipo, proposito: x.titulo || x.frase || '' }));
+  return { est, slides };
+}
+
+function tareaEstrategia(prop, material) {
+  return `${datosPropuesta(prop)}
 
 MATERIAL DE LA REUNIÓN (apuntes, notas, menciones, transcripciones y archivos):
 ${material.texto || '(ver documentos adjuntos)'}
@@ -828,9 +906,7 @@ Devuelve SOLO este JSON:
  "datos_faltantes": ["qué debe validar el comercial antes de enviar"],
  "outline": [{"tipo":"titulo|contexto|insight|tarjetas|pasos|cronograma|cifras|tabla|seccion|inversion|cierre","proposito":"qué debe contar esta slide"}]
 }
-Reglas del outline: entre 10 y 14 slides; la primera "titulo"; la última "cierre"; exactamente una "inversion" (penúltima o antepenúltima); incluye un "insight"; incluye una slide de respaldo con casos/credenciales tipo "cifras"; usa "seccion" solo si hay 2+ frentes que merecen separador. Adapta la estructura al servicio: una propuesta de Rebold Audit sigue contexto → oportunidad → la respuesta (ORI) → marco analítico → metodología → cronograma → entregables → equipo → credenciales → después del audit → inversión → respaldo → siguiente paso; una de redes/contenido/SEO sigue reto → insight → propuesta → frentes con su detalle → ecosistema integrado → inversión → cómo arrancamos → próximos pasos.`
-  });
-  return askJSON(content, { max_tokens: 6000, effort: 'medium' });
+Reglas del outline: entre 10 y 14 slides; la primera "titulo"; la última "cierre"; exactamente una "inversion" (penúltima o antepenúltima); incluye un "insight"; incluye una slide de respaldo con casos/credenciales tipo "cifras"; usa "seccion" solo si hay 2+ frentes que merecen separador. Adapta la estructura al servicio: una propuesta de Rebold Audit sigue contexto → oportunidad → la respuesta (ORI) → marco analítico → metodología → cronograma → entregables → equipo → credenciales → después del audit → inversión → respaldo → siguiente paso; una de redes/contenido/SEO sigue reto → insight → propuesta → frentes con su detalle → ecosistema integrado → inversión → cómo arrancamos → próximos pasos.`;
 }
 
 function contextoEstrategia(prop, est) {
@@ -882,7 +958,7 @@ ${JSON.stringify(slide)}
 AJUSTE SOLICITADO: ${instruccion}
 
 Devuelve SOLO {"slide": {...}} con la slide ajustada (puedes cambiar el tipo si el ajuste lo requiere).`
-  }], { max_tokens: 3000, effort: 'low' });
+  }], { max_tokens: 3000, effort: 'low', titulo: 'Ajustar esta slide con Claude' });
   return normSlide(r.slide || r);
 }
 
@@ -896,7 +972,7 @@ ${JSON.stringify(slides.map((s, i) => Object.assign({ indice: i }, s)))}
 AJUSTE SOLICITADO A TODA LA PRESENTACIÓN: ${instruccion}
 
 Devuelve SOLO: {"cambios":[{"indice":n,"slide":{...}}], "insertar":[{"despues_de":n,"slide":{...}}], "eliminar":[n]} — incluye solo lo que cambia.`
-  }], { max_tokens: 8000, effort: 'low' });
+  }], { max_tokens: 8000, effort: 'low', titulo: 'Ajustar toda la presentación con Claude' });
   const cambios = {};
   (r.cambios || []).forEach(c => { if (slides[c.indice]) cambios[c.indice] = normSlide(c.slide); });
   const del = new Set(r.eliminar || []);
@@ -972,14 +1048,19 @@ async function imagenReducida(file) {
 }
 
 async function armarMaterial(form, onStep) {
-  const bloques = [], textos = [];
+  const bloques = [], textos = [], adjuntos = [];
   if (form.notas.trim()) textos.push('## Notas del comercial\n' + form.notas.trim());
   for (const a of form.archivos) {
     if (a.error) continue;
     if (a.kind === 'texto') textos.push(`## Archivo: ${a.name}\n${a.text}`);
+    if (a.kind === 'pdf' || a.kind === 'imagen') adjuntos.push(a.name);
     if (a.kind === 'pdf') bloques.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: a.b64 }, title: a.name });
     if (a.kind === 'imagen') bloques.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: a.b64 } });
     if (a.kind === 'audio') {
+      if (a.transcripcion == null && !(online() && serverInfo && serverInfo.transcripcion)) {
+        toast(`${a.name}: no hay transcripción automática. Pega la transcripción en las notas o usa "Grabar reunión".`, 'err');
+        a.transcripcion = '';
+      }
       if (a.transcripcion == null) {
         onStep && onStep('Transcribiendo ' + a.name);
         try {
@@ -990,7 +1071,7 @@ async function armarMaterial(form, onStep) {
       if (a.transcripcion) textos.push(`## Transcripción de audio: ${a.name}\n${a.transcripcion}`);
     }
   }
-  return { bloques, texto: textos.join('\n\n') };
+  return { bloques, adjuntos, texto: textos.join('\n\n') };
 }
 
 // ════════════════════════ GRABACIÓN DE AUDIO (en vivo) ════════════════════════
@@ -1233,16 +1314,21 @@ async function generar() {
   const box = $('#progress');
   $('#gen').disabled = true;
   const paint = (i, extra) => {
-    box.innerHTML = `<div class="card prog"><h3>Generando la propuesta de ${esc(prop.marca)}…</h3><ol>${pasos.map((p, j) => `<li class="${j < i ? 'done' : j === i ? 'now' : ''}">${esc(p)}${j === i && extra ? ` <span class="muted sm">${esc(extra)}</span>` : ''}</li>`).join('')}</ol><p class="muted sm">Puede tomar 1–2 minutos.</p></div>`;
+    box.innerHTML = `<div class="card prog"><h3>Generando la propuesta de ${esc(prop.marca)}…</h3><ol>${pasos.map((p, j) => `<li class="${j < i ? 'done' : j === i ? 'now' : ''}">${esc(p)}${j === i && extra ? ` <span class="muted sm">${esc(extra)}</span>` : ''}</li>`).join('')}</ol><p class="muted sm">${iaAutomatica() ? 'Puede tomar 1–2 minutos.' : 'Sigue los pasos de la ventana: copia el prompt en claude.ai y pega aquí la respuesta.'}</p></div>`;
     box.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
   try {
     paint(0);
     const material = await armarMaterial(F, s => paint(0, s));
-    paint(1);
-    const est = await genEstrategia(prop, material);
-    paint(2, '0/2');
-    const slides = await genSlides(prop, est, (n, t) => paint(2, `${n}/${t}`));
+    paint(1, iaAutomatica() ? '' : 'esperando la respuesta de Claude…');
+    let est, slides;
+    if (iaAutomatica()) {
+      est = await genEstrategia(prop, material);
+      paint(2, '0/2');
+      slides = await genSlides(prop, est, (n, t) => paint(2, `${n}/${t}`));
+    } else {
+      ({ est, slides } = await genTodoManual(prop, material));
+    }
     paint(3);
     const fuenteTexto = material.texto + '\n' + (est.hechos_clave || []).join('\n');
     const deck = { estrategia: est, slides, fuente: { texto: fuenteTexto.slice(0, 80000), archivos: F.archivos.map(a => a.name) }, generado: new Date().toISOString() };
@@ -1572,17 +1658,22 @@ function viewConfig(primera) {
     <p class="muted sm">Con el backend (Google Apps Script) las propuestas se comparten con todo el equipo, se guardan en Google Drive como Google Slides, el log queda en Google Sheets y se envían las notificaciones de Slack y correo. Pide la URL y el código de equipo a tu líder.</p>
     <div class="row"><label class="f3">URL del Web App<input name="backendUrl" value="${esc(cfg.backendUrl)}" placeholder="https://script.google.com/macros/s/…/exec"></label><label class="f2">Código de equipo<input name="teamCode" type="password" value="${esc(cfg.teamCode)}"></label></div>
     <div class="row"><button type="button" class="btn sm" id="ping">Probar conexión</button><span id="pingOut" class="muted sm"></span></div>
+    <h3>Motor de IA</h3>
+    <div class="radios">
+      <label class="chk"><input type="radio" name="motor" value="manual" ${cfg.motor !== 'api' ? 'checked' : ''}><span><b>Mi cuenta de Claude (copiar y pegar)</b> — usa el plan de Claude de la empresa, sin costo de API. La app arma el prompt y tú pegas la respuesta.</span></label>
+      <label class="chk"><input type="radio" name="motor" value="api" ${cfg.motor === 'api' ? 'checked' : ''}><span><b>API automática</b> — sin copiar/pegar; requiere API key de Claude (pago por uso) en el backend o en modo local.</span></label>
+    </div>
     <details ${!cfg.backendUrl && cfg.apiKey ? 'open' : ''}><summary>Modo local (sin backend)</summary>
-      <p class="muted sm">Para probar sin backend: los datos quedan solo en este navegador y la IA se llama directamente con tu propia API key de Claude (se guarda solo aquí). No hay Drive, Slack ni correo en este modo.</p>
+      <p class="muted sm">Sin backend los datos quedan solo en este navegador y no hay Drive, Slack ni correo. La API key es opcional: solo se usa si eliges "API automática" (se guarda solo aquí).</p>
       <div class="row"><label class="f3">API key de Claude<input name="apiKey" type="password" value="${esc(cfg.apiKey)}" placeholder="sk-ant-…"></label><label class="f2">Modelo<input name="model" value="${esc(cfg.model)}"></label></div>
     </details>
     <div class="actions"><button class="btn primary">Guardar</button></div>
   </form>`;
   const form = $('#fCfg');
-  const read = () => { const fd = new FormData(form); ['nombre', 'email', 'backendUrl', 'teamCode', 'apiKey', 'model'].forEach(k => cfg[k] = String(fd.get(k) || '').trim()); };
+  const read = () => { const fd = new FormData(form); ['nombre', 'email', 'backendUrl', 'teamCode', 'apiKey', 'model', 'motor'].forEach(k => cfg[k] = String(fd.get(k) || '').trim()); };
   $('#ping').onclick = async () => {
     read(); $('#pingOut').textContent = 'Probando…';
-    try { serverInfo = await api('ping'); $('#pingOut').textContent = online() ? `Conectado ✓ · backend v${serverInfo.version} · modelo ${serverInfo.model} · Slack ${serverInfo.slack ? 'sí' : 'no'} · transcripción ${serverInfo.transcripcion ? 'sí' : 'no'}` : 'Sin URL: modo local'; }
+    try { serverInfo = await api('ping'); $('#pingOut').textContent = online() ? `Conectado ✓ · backend v${serverInfo.version} · IA automática ${serverInfo.ia ? 'sí' : 'no (copiar y pegar)'} · Slack ${serverInfo.slack ? 'sí' : 'no'} · transcripción ${serverInfo.transcripcion ? 'sí' : 'no'}` : 'Sin URL: modo local'; }
     catch (e) { $('#pingOut').textContent = '✕ ' + e.message; }
   };
   form.onsubmit = async e => {

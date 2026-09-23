@@ -23,7 +23,16 @@ apps-script/appsscript.json
 2. **Material de la reunión**: notas de texto, archivos (PDF, Word, PowerPoint, Excel, imágenes,
    texto) y audios. También se puede **grabar la reunión** desde el navegador y se transcribe en vivo
    (Chrome/Edge).
-3. **Generación con IA (Claude)** en dos pasos:
+3. **Generación con IA (Claude)**. Hay dos motores, que se eligen en *Configuración → Motor de IA*:
+   - **Mi cuenta de Claude (copiar y pegar)**, el predeterminado y **sin costo de API**: la app arma
+     el prompt completo (datos, notas, base de conocimiento y reglas). Lo copias en un chat nuevo de
+     **claude.ai** con la cuenta de la empresa, adjuntas ahí los PDFs o imágenes y pegas la
+     respuesta (un bloque JSON) de vuelta en la app. Los ajustes con IA por slide o de toda la
+     presentación funcionan igual.
+   - **API automática**: sin copiar/pegar. Requiere `ANTHROPIC_API_KEY` en el backend (pago por
+     uso, ~US$0,50 por propuesta con Opus 5).
+
+   En ambos casos la IA trabaja en dos capas:
    - *Diagnóstico y estrategia* con la lógica de **rebold-servicios-suite**: qué servicio(s)
      ofrecer (máx. 2 protagonistas), dolores detectados y siguiente paso de la cuenta.
    - *Narrativa y slides* con **strategic-planning-360**: problema real → oportunidad → insight →
@@ -71,7 +80,7 @@ Drive y de la hoja de Google Sheets que se crean.
    | Propiedad | Obligatoria | Valor |
    |---|---|---|
    | `TEAM_CODE` | sí | Un código que compartirás con el equipo (ej. una frase larga) |
-   | `ANTHROPIC_API_KEY` | sí | API key de Claude (console.anthropic.com) |
+   | `ANTHROPIC_API_KEY` | no | Solo para el motor "API automática" (console.anthropic.com, pago por uso). Sin ella se usa copiar y pegar con claude.ai |
    | `SLACK_BOT_TOKEN` | recomendada | Token `xoxb-…` de una app de Slack con el permiso `chat:write` → mensaje directo a cada director |
    | `SLACK_WEBHOOK_URL` | opcional | Webhook de un canal (ej. `#propuestas`) con menciones a los directores |
    | `OPENAI_API_KEY` | opcional | Para transcribir audios **subidos** (la grabación en vivo no lo necesita) |
@@ -102,8 +111,8 @@ Settings → Pages → *Deploy from a branch* → `main` / `(root)`. La app qued
 
 ## Modo local (para probar sin backend)
 Si no hay URL de backend, la app funciona en **modo local**: los datos quedan solo en ese
-navegador y la IA se llama con una API key de Claude propia (Configuración → Modo local). En este
-modo no hay Drive, Slack ni correo, pero sí se puede generar, editar y descargar el `.pptx`. El
+navegador. La IA funciona con copiar y pegar en claude.ai, o con una API key propia. En este modo
+no hay Drive, Slack ni correo, pero sí se puede generar, editar y descargar el `.pptx`. El
 Dashboard tiene un botón para ver una **propuesta de ejemplo** sin gastar IA.
 
 ## Notas técnicas
@@ -112,7 +121,7 @@ Dashboard tiene un botón para ver una **propuesta de ejemplo** sin gastar IA.
   ([PptxGenJS](https://gitbrent.github.io/PptxGenJS/)). Los textos se reducen automáticamente para
   caber en su caja.
 - Google Slides se crea subiendo el `.pptx` a Drive con conversión (servicio avanzado de Drive v3).
-- La API key de Claude vive solo en las propiedades del script. El HTML público no contiene
+- Si se usa la API, la key vive solo en las propiedades del script. El HTML público no contiene
   credenciales.
 - Límites de Apps Script: 6 min por ejecución, ~1.500 correos/día en Workspace. Por eso la
   generación se hace en llamadas cortas (estrategia y luego dos bloques de slides en paralelo).

@@ -14,7 +14,8 @@
  *
  * Propiedades del script (Configuración del proyecto → Propiedades del script):
  *   TEAM_CODE          (obligatoria) código de acceso que comparte el equipo
- *   ANTHROPIC_API_KEY  (obligatoria) API key de Claude
+ *   ANTHROPIC_API_KEY  (opcional)    API key de Claude para generación automática. Sin ella,
+ *                                    la app usa el modo "copiar y pegar" con la cuenta de claude.ai
  *   CLAUDE_MODEL       (opcional)    por defecto: claude-opus-5
  *   SLACK_BOT_TOKEN    (opcional)    xoxb-… para mensaje directo a cada director
  *   SLACK_WEBHOOK_URL  (opcional)    webhook de un canal (#propuestas) con menciones
@@ -85,6 +86,7 @@ var ACTIONS = {
       directores: DIRECTORES.map(function (d) { return { nombre: d.nombre, email: d.email }; }),
       estados: ESTADOS,
       model: modelo_(),
+      ia: !!prop_('ANTHROPIC_API_KEY'),
       transcripcion: !!prop_('OPENAI_API_KEY'),
       slack: !!(prop_('SLACK_BOT_TOKEN') || prop_('SLACK_WEBHOOK_URL'))
     };
