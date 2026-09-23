@@ -18,7 +18,8 @@
  *                                    la app usa el modo "copiar y pegar" con la cuenta de claude.ai
  *   CLAUDE_MODEL       (opcional)    por defecto: claude-opus-5
  *   SLACK_BOT_TOKEN    (opcional)    xoxb-… para mensaje directo a cada director
- *   SLACK_WEBHOOK_URL  (opcional)    webhook de un canal (#propuestas) con menciones
+ *   SLACK_CHANNEL_ID   (opcional)    ID de un canal (C…) donde la app también publica los avisos
+ *   SLACK_WEBHOOK_URL  (opcional)    alternativa sin bot: webhook de un canal con menciones
  *   OPENAI_API_KEY     (opcional)    para transcribir audios subidos
  *   DIRECTIVOS_CC      (opcional)    correos extra separados por coma para la aprobación final
  *   APP_URL            (opcional)    URL pública del aplicativo (GitHub Pages)
@@ -30,7 +31,7 @@ var VERSION = '1.0.0';
 var DEFAULT_APP_URL = 'https://sebastianromero-rebold.github.io/NewBusiness/';
 
 // Directores de área que pueden revisar propuestas.
-// Los IDs y correos de Slack se tomaron del workspace de Slack de Rebold (sep-2026).
+// IDs de Slack del workspace de ISPD, confirmados por Sebastian Romero (sep-2026).
 // Verifica los correos antes de salir a producción.
 var DIRECTORES = [
   { nombre: 'Natalia Patiño',    email: 'andrea.patino@letsrebold.com',    slack: 'U0BKUAQ8P5M' },
@@ -463,16 +464,20 @@ function directoresDe_(p) {
 function slack_(dirs, texto) {
   var enviados = [];
   var token = prop_('SLACK_BOT_TOKEN');
-  if (token && dirs.length) {
-    dirs.forEach(function (d) {
-      if (!d.slack) return;
-      var r = UrlFetchApp.fetch('https://slack.com/api/chat.postMessage', {
-        method: 'post', contentType: 'application/json; charset=utf-8',
-        headers: { Authorization: 'Bearer ' + token },
-        payload: JSON.stringify({ channel: d.slack, text: texto }), muteHttpExceptions: true
-      });
-      try { if (JSON.parse(r.getContentText()).ok) enviados.push('DM ' + d.nombre); } catch (e) {}
+  var postear = function (canal) {
+    var r = UrlFetchApp.fetch('https://slack.com/api/chat.postMessage', {
+      method: 'post', contentType: 'application/json; charset=utf-8',
+      headers: { Authorization: 'Bearer ' + token },
+      payload: JSON.stringify({ channel: canal, text: texto }), muteHttpExceptions: true
     });
+    try { return JSON.parse(r.getContentText()).ok; } catch (e) { return false; }
+  };
+  if (token) {
+    // Mensaje directo a cada director (el ID de usuario abre el chat con la app)
+    dirs.forEach(function (d) { if (d.slack && postear(d.slack)) enviados.push('DM ' + d.nombre); });
+    // Canal del equipo (opcional): la app debe estar agregada al canal
+    var canal = prop_('SLACK_CHANNEL_ID');
+    if (canal && postear(canal)) enviados.push('canal');
   }
   var hook = prop_('SLACK_WEBHOOK_URL');
   if (hook) {

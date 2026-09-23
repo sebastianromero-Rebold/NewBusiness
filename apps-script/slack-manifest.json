@@ -1,0 +1,23 @@
+{
+  "display_information": {
+    "name": "Rebold NewBusiness",
+    "description": "Avisos de propuestas comerciales para revisión y aprobación",
+    "background_color": "#0b0b0c"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "Rebold NewBusiness",
+      "always_online": true
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": ["chat:write", "chat:write.public"]
+    }
+  },
+  "settings": {
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}

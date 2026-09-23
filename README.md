@@ -81,8 +81,9 @@ Drive y de la hoja de Google Sheets que se crean.
    |---|---|---|
    | `TEAM_CODE` | sí | Un código que compartirás con el equipo (ej. una frase larga) |
    | `ANTHROPIC_API_KEY` | no | Solo para el motor "API automática" (console.anthropic.com, pago por uso). Sin ella se usa copiar y pegar con claude.ai |
-   | `SLACK_BOT_TOKEN` | recomendada | Token `xoxb-…` de una app de Slack con el permiso `chat:write` → mensaje directo a cada director |
-   | `SLACK_WEBHOOK_URL` | opcional | Webhook de un canal (ej. `#propuestas`) con menciones a los directores |
+   | `SLACK_BOT_TOKEN` | recomendada | Token `xoxb-…` de la app de Slack (workspace ISPD). Créala con **From a manifest** usando [`apps-script/slack-manifest.json`](apps-script/slack-manifest.json) → mensaje directo a cada director |
+   | `SLACK_CHANNEL_ID` | opcional | ID de un canal (empieza por `C`) donde la app también publica los avisos. Hay que agregar la app al canal |
+   | `SLACK_WEBHOOK_URL` | opcional | Alternativa sin bot: webhook de un canal con menciones a los directores |
    | `OPENAI_API_KEY` | opcional | Para transcribir audios **subidos** (la grabación en vivo no lo necesita) |
    | `DIRECTIVOS_CC` | opcional | Correos adicionales (separados por coma) para el correo de aprobación final |
    | `CLAUDE_MODEL` | opcional | Por defecto `claude-opus-5` |
