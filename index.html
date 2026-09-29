@@ -684,6 +684,25 @@ function toast(msg, type) {
 }
 
 // ════════════════════════ API (backend Apps Script o modo local) ════════════════════════
+function nuevoIdPropuesta() {
+  const d = new Date(), f = n => String(n).padStart(2, '0');
+  const rnd = [...crypto.getRandomValues(new Uint8Array(3))].map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+  return `P${String(d.getFullYear()).slice(2)}${f(d.getMonth() + 1)}${f(d.getDate())}-${rnd}`;
+}
+
+// Guarda y devuelve siempre la propuesta. Si la respuesta del backend no la trae
+// (se ha visto con Apps Script), la vuelve a leer por id antes de rendirse.
+async function guardarPropuesta(data) {
+  const id = data.propuesta.id;
+  let r = null, err = null;
+  try { r = await api('save', data); } catch (e) { err = e; }
+  if (r && r.propuesta && r.propuesta.id) return r.propuesta;
+  console.warn('save sin propuesta en la respuesta', r, err);
+  if (id) {
+    try { const g = await api('get', { id }); if (g.propuesta) return g.propuesta; } catch (e) { console.warn('get tras save', e); }
+  }
+  throw err || new Error('El servidor no confirmó el guardado. Pulsa "Reintentar guardar" (no se duplica la propuesta).');
+}
 async function api(action, data = {}) {
   if (!online()) return LOCAL[action](data);
   const res = await fetch(cfg.backendUrl, {
@@ -716,7 +735,7 @@ const LOCAL = {
   get(d) { return { propuesta: this._find(d.id), deck: store.get('rb_deck_' + d.id, null) }; },
   save(d) {
     const p = Object.assign({}, d.propuesta), prev = p.id && this._find(p.id), now = new Date().toISOString();
-    if (!prev) Object.assign(p, { id: 'L' + Date.now().toString(36).toUpperCase(), creado: now, estado: p.estado || 'Borrador', version: 0, revisiones: [], creadoPor: cfg.email || cfg.nombre });
+    if (!prev) Object.assign(p, { id: p.id || 'L' + Date.now().toString(36).toUpperCase(), creado: now, estado: p.estado || 'Borrador', version: 0, revisiones: [], creadoPor: cfg.email || cfg.nombre });
     else ['creado', 'creadoPor', 'slidesUrl', 'slidesId', 'revisiones', 'version'].forEach(k => { p[k] = prev[k]; });
     p.estado = p.estado || (prev && prev.estado) || 'Borrador';
     p.actualizado = now;
@@ -1309,7 +1328,8 @@ function viewNueva() {
 
 async function generar() {
   const F = FORM;
-  const prop = { marca: F.marca, presupuesto: F.presupuesto, moneda: F.moneda, periodicidad: F.periodicidad, tipoCliente: F.tipoCliente, comercial: F.comercial, comercialEmail: F.comercialEmail, clientes: F.clientes.filter(c => c.nombre), directores: F.directores };
+  F.id = F.id || nuevoIdPropuesta();
+  const prop = { id: F.id, marca: F.marca, presupuesto: F.presupuesto, moneda: F.moneda, periodicidad: F.periodicidad, tipoCliente: F.tipoCliente, comercial: F.comercial, comercialEmail: F.comercialEmail, clientes: F.clientes.filter(c => c.nombre), directores: F.directores };
   const pasos = ['Leyendo el material de la reunión', 'Diagnóstico y estrategia (Growth Suite + Strategic Planning 360)', 'Redactando las slides', 'Maquetando la presentación', 'Guardando borrador'];
   const box = $('#progress');
   $('#gen').disabled = true;
@@ -1332,18 +1352,34 @@ async function generar() {
     paint(3);
     const fuenteTexto = material.texto + '\n' + (est.hechos_clave || []).join('\n');
     const deck = { estrategia: est, slides, fuente: { texto: fuenteTexto.slice(0, 80000), archivos: F.archivos.map(a => a.name) }, generado: new Date().toISOString() };
+    S.pendiente = { propuesta: Object.assign({ resumen: resumenDe(est) }, prop), deck, detalle: `Generada con IA: ${slides.length} slides · ${(est.diagnostico && est.diagnostico.servicios || []).map(s => s.servicio).join(' + ')}` };
     paint(4);
-    const r = await api('save', { propuesta: Object.assign({ resumen: resumenDe(est) }, prop), deck, detalle: `Generada con IA: ${slides.length} slides · ${(est.diagnostico && est.diagnostico.servicios || []).map(s => s.servicio).join(' + ')}` });
-    const archivos = F.archivos;
-    S.current = { prop: r.propuesta, deck, dirty: false };
-    S.sel = 0;
-    FORM = nuevaForm();
-    location.hash = '#/p/' + r.propuesta.id;
-    if (online()) respaldarArchivos(r.propuesta.id, archivos);
+    await guardarGenerada(box);
   } catch (e) {
     console.error(e);
     box.innerHTML = `<div class="card prog err"><h3>No se pudo generar</h3><p>${esc(e.message)}</p></div>`;
     $('#gen').disabled = false;
+  }
+}
+
+// Guarda la presentación recién generada. Si falla, deja un botón para reintentar
+// sin volver a pasar por Claude.
+async function guardarGenerada(box) {
+  const pend = S.pendiente;
+  try {
+    const prop = await guardarPropuesta(pend);
+    const archivos = FORM.archivos;
+    S.current = { prop, deck: pend.deck, dirty: false };
+    S.sel = 0; S.pendiente = null;
+    FORM = nuevaForm();
+    location.hash = '#/p/' + prop.id;
+    if (online()) respaldarArchivos(prop.id, archivos);
+  } catch (e) {
+    console.error(e);
+    box.innerHTML = `<div class="card prog err"><h3>La presentación se generó, pero no se pudo guardar</h3><p>${esc(e.message)}</p>
+      <p class="muted sm">La respuesta de Claude sigue en memoria: no hace falta volver a pegarla.</p>
+      <div class="actions"><button type="button" class="btn primary" id="retrySave">Reintentar guardar</button></div></div>`;
+    $('#retrySave').onclick = async ev => { ev.currentTarget.disabled = true; ev.currentTarget.textContent = 'Guardando…'; await guardarGenerada(box); };
   }
 }
 
@@ -1497,8 +1533,8 @@ async function viewEditor(id) {
     S.current.dirty = true; $('#aiAll').value = ''; drawThumbs(); drawStage(); toast('Presentación ajustada');
   });
   const guardar = async (detalle) => {
-    const r = await api('save', { propuesta: prop, deck, detalle: detalle || 'Edición de slides' });
-    Object.assign(prop, r.propuesta); S.current.dirty = false;
+    Object.assign(prop, await guardarPropuesta({ propuesta: prop, deck, detalle: detalle || 'Edición de slides' }));
+    S.current.dirty = false;
   };
   $('#bSave').onclick = e => busy(e.currentTarget, async () => { await guardar(); toast('Cambios guardados'); });
   $('#bPptx').onclick = e => busy(e.currentTarget, async () => {
@@ -1706,9 +1742,9 @@ async function abrirDemo() {
       { tipo: 'cierre', kicker: 'Próximos pasos', titulo: 'De la propuesta / a los resultados.', items: [{ titulo: 'Aprobar la propuesta', texto: 'Confirmar alcance y arranque.' }, { titulo: 'Kickoff conjunto', texto: 'Alinear objetivos y accesos.' }, { titulo: 'Primer entregable', texto: 'Plan del mes 1 listo en 30 días.' }] }
     ], fuente: { texto: '' }
   };
-  const r = await api('save', { propuesta: Object.assign({ estado: 'Borrador' }, prop), deck, detalle: 'Propuesta de ejemplo' });
-  S.current = { prop: r.propuesta, deck, dirty: false }; S.sel = 0;
-  location.hash = '#/p/' + r.propuesta.id;
+  const guardada = await guardarPropuesta({ propuesta: Object.assign({ id: nuevoIdPropuesta(), estado: 'Borrador' }, prop), deck, detalle: 'Propuesta de ejemplo' });
+  S.current = { prop: guardada, deck, dirty: false }; S.sel = 0;
+  location.hash = '#/p/' + guardada.id;
 }
 
 // ════════════════════════ ARRANQUE ════════════════════════
