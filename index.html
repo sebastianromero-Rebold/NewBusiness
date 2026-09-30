@@ -9,10 +9,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js" defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+<link rel="preconnect" href="https://script.google.com">
+<link rel="preconnect" href="https://script.googleusercontent.com">
 <style>
 :root{
   --bg:#08080A;--panel:#111114;--panel2:#18181C;--line:#26262C;--text:#F2F2F4;--muted:#9A9AA2;
@@ -622,6 +620,7 @@ async function iconPng(name, color) {
 }
 
 async function buildPptx(deck, prop) {
+  await lib('pptx');
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
   pptx.author = 'Rebold'; pptx.company = 'Rebold by ISPD';
@@ -683,6 +682,27 @@ function toast(msg, type) {
   setTimeout(() => t.remove(), type === 'err' ? 9000 : 4500);
 }
 
+// ════════════════════════ LIBRERÍAS BAJO DEMANDA ════════════════════════
+// Se descargan solo cuando hacen falta (exportar .pptx o leer Word/PowerPoint/Excel),
+// así la app abre rápido.
+const LIBS = {
+  pptx: 'https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js',
+  jszip: 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
+  mammoth: 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js',
+  xlsx: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
+};
+const _libs = {};
+function lib(name) {
+  if (!_libs[name]) _libs[name] = new Promise((ok, ko) => {
+    const s = document.createElement('script');
+    s.src = LIBS[name]; s.async = true;
+    s.onload = ok;
+    s.onerror = () => { delete _libs[name]; ko(new Error('No se pudo descargar un componente (' + name + '). Revisa tu conexión e intenta de nuevo.')); };
+    document.head.appendChild(s);
+  });
+  return _libs[name];
+}
+
 // ════════════════════════ API (backend Apps Script o modo local) ════════════════════════
 function nuevoIdPropuesta() {
   const d = new Date(), f = n => String(n).padStart(2, '0');
@@ -703,16 +723,44 @@ async function guardarPropuesta(data) {
   }
   throw err || new Error('El servidor no confirmó el guardado. Pulsa "Reintentar guardar" (no se duplica la propuesta).');
 }
+// Acciones que se pueden repetir sin efectos duplicados (el id de la propuesta lo pone el navegador).
+const REINTENTABLES = new Set(['ping', 'list', 'get', 'log', 'save', 'status']);
+
 async function api(action, data = {}) {
   if (!online()) return LOCAL[action](data);
-  const res = await fetch(cfg.backendUrl, {
-    method: 'POST', redirect: 'follow',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(Object.assign({ action, code: cfg.teamCode, user: { nombre: cfg.nombre, email: cfg.email } }, data))
-  });
+  const body = JSON.stringify(Object.assign({ action, code: cfg.teamCode, user: { nombre: cfg.nombre, email: cfg.email } }, data));
+  const intentos = REINTENTABLES.has(action) ? 3 : 1;
+  let ultimo;
+  for (let i = 0; i < intentos; i++) {
+    if (i) await new Promise(r => setTimeout(r, 1200 * i + Math.random() * 800));
+    try { return await llamarBackend(action, body); }
+    catch (e) { ultimo = e; if (e.definitivo) break; }
+  }
+  throw ultimo;
+}
+
+async function llamarBackend(action, body) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), action === 'llm' ? 330000 : 90000);
+  let res, txt;
+  try {
+    res = await fetch(cfg.backendUrl, { method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body, signal: ctrl.signal });
+    txt = await res.text();
+  } catch (e) {
+    throw new Error(e.name === 'AbortError' ? 'El servidor tardó demasiado en responder. Intenta de nuevo.' : 'No hay conexión con el servidor. Revisa tu internet e intenta de nuevo.');
+  } finally { clearTimeout(t); }
   let j;
-  try { j = await res.json(); } catch (e) { throw new Error('El backend no respondió JSON. Revisa la URL del Web App y que esté desplegado con acceso "Cualquier persona".'); }
-  if (!j.ok) throw new Error(j.error || 'Error del backend');
+  try { j = JSON.parse(txt); } catch (e) {
+    // Google devolvió una página HTML (servidor ocupado, error temporal o despliegue mal configurado)
+    const titulo = ((txt || '').match(/<title>([^<]*)<\/title>/i) || [])[1] || '';
+    console.warn('Respuesta no JSON del backend', action, res && res.status, (txt || '').slice(0, 800));
+    throw new Error('El servidor de Google no respondió bien' + (titulo ? ` ("${titulo.trim()}")` : '') + '. Suele ser temporal: intenta de nuevo en unos segundos.');
+  }
+  if (!j.ok) {
+    const err = new Error(j.error || 'Error del backend');
+    err.definitivo = !/ocupado|lock|timed out|tiempo|service|servicio|intenta de nuevo/i.test(err.message);
+    throw err;
+  }
   return j;
 }
 
@@ -1033,8 +1081,9 @@ async function prepararArchivo(file) {
       if (file.size > 20e6) throw new Error('PDF mayor a 20 MB');
       a.kind = 'pdf'; a.b64 = b64of(await readAs(file, 'url'));
     }
-    else if (ext === 'docx') { a.kind = 'texto'; a.text = (await mammoth.extractRawText({ arrayBuffer: await readAs(file, 'buffer') })).value; }
+    else if (ext === 'docx') { await lib('mammoth'); a.kind = 'texto'; a.text = (await mammoth.extractRawText({ arrayBuffer: await readAs(file, 'buffer') })).value; }
     else if (ext === 'pptx') {
+      await lib('jszip');
       const zip = await JSZip.loadAsync(await readAs(file, 'buffer'));
       const slides = Object.keys(zip.files).filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f)).sort((x, y) => parseInt(x.match(/\d+/)) - parseInt(y.match(/\d+/)));
       const out = [];
@@ -1042,6 +1091,7 @@ async function prepararArchivo(file) {
       a.kind = 'texto'; a.text = out.map((t, i) => `[Slide ${i + 1}] ${t}`).join('\n');
     }
     else if (['xlsx', 'xls'].includes(ext)) {
+      await lib('xlsx');
       const wb = XLSX.read(await readAs(file, 'buffer'), { type: 'array' });
       a.kind = 'texto'; a.text = wb.SheetNames.map(n => `[Hoja ${n}]\n` + XLSX.utils.sheet_to_csv(wb.Sheets[n])).join('\n').slice(0, 60000);
     }
@@ -1168,9 +1218,20 @@ function loading(msg) { view().innerHTML = `<div class="empty"><div class="spin"
 
 // ── Dashboard ──
 async function viewDashboard() {
-  loading('Cargando propuestas…');
-  try { S.props = (await api('list')).propuestas || []; }
-  catch (e) { view().innerHTML = `<div class="empty"><p>No se pudo cargar: ${esc(e.message)}</p><a class="btn" href="#/config">Revisar configuración</a></div>`; return; }
+  const cache = online() ? store.get('rb_cache_list', null) : null;
+  const cargar = api('list').then(r => {
+    const nuevas = r.propuestas || [];
+    const cambio = JSON.stringify(nuevas) !== JSON.stringify(S.props);
+    S.props = nuevas;
+    if (online()) store.set('rb_cache_list', nuevas);
+    return cambio;
+  });
+  if (cache) S.props = cache;
+  else {
+    loading('Cargando propuestas…');
+    try { await cargar; }
+    catch (e) { view().innerHTML = `<div class="empty"><p>No se pudo cargar: ${esc(e.message)}</p><button class="btn" onclick="route()">Reintentar</button> <a class="btn" href="#/config">Revisar configuración</a></div>`; return; }
+  }
   const f = store.get('rb_filtros', { q: '', estado: '', verEliminadas: false });
   const draw = () => {
     const ps = S.props.filter(p => (f.verEliminadas || p.estado !== 'Eliminada'));
@@ -1238,6 +1299,11 @@ async function viewDashboard() {
     });
   };
   draw();
+  if (cache) {
+    const enDashboard = () => ['', '#', '#/'].includes(location.hash);
+    cargar.then(cambio => { if (cambio && enDashboard() && !document.activeElement.matches('#fq')) draw(); })
+      .catch(e => { if (enDashboard()) toast('No se pudo actualizar la lista: ' + e.message, 'err'); });
+  }
 }
 
 // ── Nueva propuesta ──
@@ -1467,6 +1533,7 @@ async function viewEditor(id) {
 
   const slides = deck.slides;
   const pages = () => deckPages(deck, prop);
+  setTimeout(() => lib('pptx').catch(() => {}), 1500);
   const drawThumbs = () => {
     const ps = pages();
     const th = $('#thumbs'); th.innerHTML = '';
@@ -1672,8 +1739,8 @@ async function viewLog() {
   view().innerHTML = `
   <div class="head"><div><h1>Registro de actividad</h1><p class="muted">Todo lo que se hace en la herramienta queda aquí. Cada cambio guarda una copia completa del registro anterior (respaldo).</p></div>
     <div class="acts">${r.sheetUrl ? `<a class="btn" target="_blank" rel="noopener" href="${esc(r.sheetUrl)}">Abrir Google Sheets</a>` : '<button class="btn" id="expLocal">Exportar respaldo local (.json)</button>'}</div></div>
-  <div class="card"><div class="tablewrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Marca</th><th>Detalle</th><th>Respaldo</th></tr></thead><tbody>
-  ${rows.map(x => `<tr><td class="sm nowrap">${esc(new Date(x.fecha).toLocaleString('es-CO'))}</td><td>${esc(x.usuario)}</td><td><span class="tag">${esc(String(x.accion).replace(/_/g, ' '))}</span></td><td>${x.propuestaId ? `<a href="#/p/${esc(x.propuestaId)}">${esc(x.marca || x.propuestaId)}</a>` : ''}</td><td class="sm">${esc(x.detalle)}</td><td>${x.snapshot ? '✓' : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Sin actividad todavía.</td></tr>'}
+  <div class="card"><div class="tablewrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Marca</th><th>Detalle</th></tr></thead><tbody>
+  ${rows.map(x => `<tr><td class="sm nowrap">${esc(new Date(x.fecha).toLocaleString('es-CO'))}</td><td>${esc(x.usuario)}</td><td><span class="tag">${esc(String(x.accion).replace(/_/g, ' '))}</span></td><td>${x.propuestaId ? `<a href="#/p/${esc(x.propuestaId)}">${esc(x.marca || x.propuestaId)}</a>` : ''}</td><td class="sm">${esc(x.detalle)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Sin actividad todavía.</td></tr>'}
   </tbody></table></div></div>`;
   const ex = $('#expLocal');
   if (ex) ex.onclick = () => {
@@ -1709,12 +1776,12 @@ function viewConfig(primera) {
   const read = () => { const fd = new FormData(form); ['nombre', 'email', 'backendUrl', 'teamCode', 'apiKey', 'model', 'motor'].forEach(k => cfg[k] = String(fd.get(k) || '').trim()); };
   $('#ping').onclick = async () => {
     read(); $('#pingOut').textContent = 'Probando…';
-    try { serverInfo = await api('ping'); $('#pingOut').textContent = online() ? `Conectado ✓ · backend v${serverInfo.version} · IA automática ${serverInfo.ia ? 'sí' : 'no (copiar y pegar)'} · Slack ${serverInfo.slack ? 'sí' : 'no'} · transcripción ${serverInfo.transcripcion ? 'sí' : 'no'}` : 'Sin URL: modo local'; }
+    try { serverInfo = await api('ping'); store.set('rb_server', serverInfo); $('#pingOut').textContent = online() ? `Conectado ✓ · backend v${serverInfo.version} · IA automática ${serverInfo.ia ? 'sí' : 'no (copiar y pegar)'} · Slack ${serverInfo.slack ? 'sí' : 'no'} · transcripción ${serverInfo.transcripcion ? 'sí' : 'no'}` : 'Sin URL: modo local'; }
     catch (e) { $('#pingOut').textContent = '✕ ' + e.message; }
   };
   form.onsubmit = async e => {
     e.preventDefault(); read(); saveCfg();
-    if (online()) { try { serverInfo = await api('ping'); } catch (err) { toast(err.message, 'err'); } }
+    if (online()) { try { serverInfo = await api('ping'); store.set('rb_server', serverInfo); } catch (err) { toast(err.message, 'err'); } }
     drawUser(); toast('Configuración guardada');
     if (primera) route();
   };
@@ -1756,8 +1823,12 @@ window.addEventListener('hashchange', () => {
 window.addEventListener('beforeunload', e => { if (S.current && S.current.dirty) { e.preventDefault(); e.returnValue = ''; } });
 (async function init() {
   drawUser();
-  if (online() && cfg.nombre) { try { serverInfo = await api('ping'); } catch (e) { toast('Backend: ' + e.message, 'err'); } }
+  serverInfo = store.get('rb_server', null);
   route();
+  if (online() && cfg.nombre) {
+    api('ping').then(si => { serverInfo = si; store.set('rb_server', si); })
+      .catch(e => toast('Servidor: ' + e.message, 'err'));
+  }
 })();
 
 </script>

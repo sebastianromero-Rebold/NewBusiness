@@ -26,7 +26,7 @@
  *   SPREADSHEET_ID / ROOT_FOLDER_ID  se crean solos en el primer uso
  */
 
-var VERSION = '1.0.0';
+var VERSION = '1.1.0';
 
 var DEFAULT_APP_URL = 'https://sebastianromero-rebold.github.io/NewBusiness/';
 
@@ -75,8 +75,10 @@ function doPost(e) {
     out.ok = true;
     return json_(out);
   } catch (err) {
-    try { log_(user, 'error', req.id || '', '', String(err && err.message || err), ''); } catch (e2) {}
-    return json_({ ok: false, error: String(err && err.message || err) });
+    var msg = String(err && err.message || err);
+    if (/lock|timed out|too many|demasiad|Service/i.test(msg)) msg = 'El servidor está ocupado con otras solicitudes. Intenta de nuevo en unos segundos. (' + msg + ')';
+    try { log_(user, 'error', req.id || '', '', msg, ''); } catch (e2) {}
+    return json_({ ok: false, error: msg });
   }
 }
 
@@ -134,7 +136,12 @@ var ACTIONS = {
   },
 
   list: function () {
-    return { propuestas: leerPropuestas_() };
+    var cache = CacheService.getScriptCache();
+    var c = cache.get('props');
+    if (c) { try { return { propuestas: JSON.parse(c) } ; } catch (e) {} }
+    var ps = leerPropuestas_();
+    try { cache.put('props', JSON.stringify(ps), 30); } catch (e) {}
+    return { propuestas: ps };
   },
 
   get: function (req) {
@@ -149,10 +156,18 @@ var ACTIONS = {
 
   // Crea o actualiza la propuesta. Si viene deck, se guarda como JSON en Drive (una versión por guardado).
   save: function (req, user) {
+    var ahora = new Date().toISOString();
+    var entrada = req.propuesta || {};
+    var folder = carpetaMarca_(entrada.marca);
+    var deckId = '';
+    if (req.deck) {
+      var previa = entrada.id ? buscar_(entrada.id) : null;
+      var nombreDeck = 'deck_v' + ((Number(previa && previa.version) || 0) + 1) + '_' + ahora.slice(0, 19).replace(/[:T]/g, '-') + '.json';
+      deckId = folder.createFile(nombreDeck, JSON.stringify(req.deck), 'application/json').getId();
+    }
     return conLock_(function () {
-      var p = req.propuesta || {};
+      var p = entrada;
       var existente = p.id ? buscar_(p.id) : null;
-      var ahora = new Date().toISOString();
       if (!existente) {
         p.id = p.id || nuevoId_();
         p.creado = ahora;
@@ -167,13 +182,8 @@ var ACTIONS = {
         if (!p.estado) p.estado = existente.estado;
       }
       p.actualizado = ahora;
-      var folder = carpetaMarca_(p.marca);
       p.carpetaUrl = folder.getUrl();
-      if (req.deck) {
-        var nombre = 'deck_v' + ((Number(p.version) || 0) + 1) + '_' + ahora.slice(0, 19).replace(/[:T]/g, '-') + '.json';
-        var f = folder.createFile(nombre, JSON.stringify(req.deck), 'application/json');
-        p.deckFileId = f.getId();
-      }
+      if (deckId) p.deckFileId = deckId;
       escribir_(p);
       log_(user, existente ? 'actualizar_propuesta' : 'crear_propuesta', p.id, p.marca,
         req.detalle || '', existente ? JSON.stringify(existente) : '');
@@ -333,10 +343,11 @@ var ACTIONS = {
     var n = sh.getLastRow() - 1;
     if (n <= 0) return { log: [] };
     var limite = Math.min(Number(req.limit) || 300, n);
-    var vals = sh.getRange(sh.getLastRow() - limite + 1, 1, limite, COLS_LOG.length).getValues();
+    var cols = COLS_LOG.length - 1; // sin 'snapshot': el respaldo completo queda en la hoja
+    var vals = sh.getRange(sh.getLastRow() - limite + 1, 1, limite, cols).getValues();
     var out = vals.reverse().map(function (r) {
       var o = {};
-      COLS_LOG.forEach(function (c, i) { o[c] = c === 'snapshot' ? (r[i] ? '1' : '') : r[i]; });
+      COLS_LOG.slice(0, cols).forEach(function (c, i) { o[c] = r[i]; });
       if (o.fecha instanceof Date) o.fecha = o.fecha.toISOString();
       return o;
     });
@@ -346,19 +357,23 @@ var ACTIONS = {
 
 // ───────────────────────────── Sheets ─────────────────────────────
 
+var _SS = null, _HOJAS = {}, _RAIZ = null;
+
 function libro_() {
+  if (_SS) return _SS;
   var props = PropertiesService.getScriptProperties();
   var id = props.getProperty('SPREADSHEET_ID');
   if (id) {
-    try { return SpreadsheetApp.openById(id); } catch (e) {}
+    try { return (_SS = SpreadsheetApp.openById(id)); } catch (e) {}
   }
   var ss = SpreadsheetApp.create('Rebold NewBusiness · Base de propuestas y log');
   props.setProperty('SPREADSHEET_ID', ss.getId());
   try { DriveApp.getFileById(ss.getId()).moveTo(raiz_()); } catch (e) {}
-  return ss;
+  return (_SS = ss);
 }
 
 function hoja_(nombre, cols) {
+  if (_HOJAS[nombre]) return _HOJAS[nombre];
   var ss = libro_();
   var sh = ss.getSheetByName(nombre);
   if (!sh) {
@@ -368,7 +383,7 @@ function hoja_(nombre, cols) {
     var def = ss.getSheetByName('Hoja 1') || ss.getSheetByName('Sheet1');
     if (def && ss.getSheets().length > 1) ss.deleteSheet(def);
   }
-  return sh;
+  return (_HOJAS[nombre] = sh);
 }
 
 var JSON_COLS = { clientes: 1, directores: 1, revisiones: 1, resumen: 1 };
@@ -400,6 +415,7 @@ function buscar_(id) {
 }
 
 function escribir_(p) {
+  try { CacheService.getScriptCache().remove('props'); } catch (e) {}
   var sh = hoja_('Propuestas', COLS_PROP);
   var fila = COLS_PROP.map(function (c) {
     var v = p[c];
@@ -425,9 +441,10 @@ function log_(user, accion, id, marca, detalle, snapshot) {
 // ───────────────────────────── Drive ─────────────────────────────
 
 function raiz_() {
+  if (_RAIZ) return _RAIZ;
   var props = PropertiesService.getScriptProperties();
   var id = props.getProperty('ROOT_FOLDER_ID');
-  if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
+  if (id) { try { return (_RAIZ = DriveApp.getFolderById(id)); } catch (e) {} }
   var f = DriveApp.createFolder('Rebold · Propuestas NewBusiness');
   try { f.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.EDIT); } catch (e) {}
   props.setProperty('ROOT_FOLDER_ID', f.getId());
@@ -435,7 +452,13 @@ function raiz_() {
 }
 
 function carpetaMarca_(marca) {
-  return subcarpeta_(raiz_(), String(marca || 'Sin marca').trim() || 'Sin marca');
+  var nombre = String(marca || 'Sin marca').trim() || 'Sin marca';
+  var cache = CacheService.getScriptCache(), key = 'f:' + nombre.toLowerCase().slice(0, 200);
+  var id = cache.get(key);
+  if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
+  var f = subcarpeta_(raiz_(), nombre);
+  try { cache.put(key, f.getId(), 21600); } catch (e) {}
+  return f;
 }
 
 function subcarpeta_(padre, nombre) {
@@ -515,7 +538,7 @@ function claude_(key, body, conFallback) {
 
 function conLock_(fn) {
   var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  if (!lock.tryLock(25000)) throw new Error('El servidor está ocupado con otras solicitudes. Intenta de nuevo en unos segundos.');
   try { return fn(); } finally { lock.releaseLock(); }
 }
 
